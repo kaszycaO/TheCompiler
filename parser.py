@@ -63,6 +63,8 @@ def back_path(addr, operation, args):
 
 def prepare_num(num, register, store=True):
 
+    # usunąć do starej wersji
+    code.append(("RESET " + register))
     helper = []
     while num != 0:
         if num % 2 == 1:
@@ -90,86 +92,87 @@ def assign_to_tab(sym_name, arr, register):
 
 
     # mam a z p(a)
-    code.append("RESET " + register)
     prepare_num(arr_off, register, False)
     code.append("RESET e")
     code.append("LOAD " + 'e' + " " + register)
     # biorę p(a)
-    code.append("RESET " + register)
     # jestem na p(0)
     prepare_num(off - start, register, False)
     # jestem na p(arr)
     code.append("ADD " + register + " " + 'e')
 
+def load_var(sym_name, arr=-1):
 
-def prepare_assign(name_A, name_B, tab_A_mem=0, tab_B_mem=0):
+    # sym_name (type, name, args)
+    sym = get_sym(sym_name)
 
-    if name_B[0] != 'expression':
-        # p(b) =
-        skip_A = False
-        # = p(b)
-        skip_B = False
-        sym_A = get_sym(name_A)
-        sym_B = get_sym(name_B)
+    # pid
+    if arr == -1:
+        itr = sym[3]
+        prepare_num(itr, 'a')
+    else:
+        if str(arr).isdigit():  # tab(const)
+            itr = sym[3] + (arr - sym[1])
 
-        if str(tab_A_mem).isdigit() == False:
-            skip_A = True
+            if itr < 0 or itr > sym[2]:
+                raise Exception("Index out of bounds in table: " + sym_name)
 
-        if str(tab_B_mem).isdigit() == False:
-            skip_B = True
-
-        if skip_A == False:
-            itr_A = sym_A[3] + (tab_A_mem - sym_A[1])
-            if sym_A[0] == True:
-                if itr_A < 0 or tab_A_mem > sym_A[2]:
-                    raise Exception("Index out of bounds in table: " + name_A)
-
-        if skip_B == False:
-            itr_B = sym_B[3] + (tab_B_mem - sym_B[1])
-            if sym_B[0] == True:
-                if itr_B < 0 or tab_B_mem > sym_B[2]:
-                    raise Exception("Index out of bounds in table: " + name_B)
+            prepare_num(itr, 'a')
 
 
-        if skip_B == False:
-            code.append("RESET a")
+        else:   # tab(pid)
+            assign_to_tab(sym_name, arr, 'a')
 
-        code.append("( Init " + name_A + "=" + name_B + ' )')
 
-        if skip_B == False:
-            prepare_num(itr_B, 'a', False)
+def assign_to_mem(sym_name, arr=-1):
+
+    # get data from load_var
+
+    if str(sym_name).isdigit():  # num
+        prepare_num(sym_name, 'b')
+    else:
+        sym = get_sym(sym_name)
+
+        if arr == -1: # pid
+            itr = sym[3]
+            prepare_num(itr, 'a')
+
         else:
-            assign_to_tab(name_B, tab_B_mem, 'a')
+            if str(arr).isdigit():  # tab(const)
+                itr = sym[3] + (arr - sym[1])
+
+                if itr < 0 or itr > sym[2]:
+                    raise Exception("Index out of bounds in table: " + sym_name)
+
+                prepare_num(itr, 'a')
+            else:   # tab(pid)
+                assign_to_tab(sym_name, arr, 'a')
+
+        code.append("LOAD b a")
+
+
+def math_opperation(arg_1, arg_2, opp):
+    code.append("( " + opp + str(arg_1[1]) + " " + str(arg_2[1]) + ' )')
+    if arg_1[0] == 'num':
+        prepare_num(arg_1[1], 'b')
+        load_var(arg_2[1], arg_2[2])
+        code.append("LOAD a a")
+        code.append(opp + "b a")
+
+    if arg_2[0] == 'num':
+        prepare_num(arg_2[1], 'b')
+        load_var(arg_1[1], arg_1[2])
+        code.append("LOAD a a")
+        code.append(opp + "b a")
+
+    if arg_1[0] != 'num' and arg_2[0] != 'num':
+        load_var(arg_1[1], arg_1[2])
+        code.append("RESET e")
+        code.append("LOAD e a")
+        load_var(arg_2[1], arg_2[2])
         code.append("RESET b")
         code.append("LOAD b a")
-        if skip_A == False:
-            code.append("RESET a")
-            prepare_num(itr_A, 'a', False)
-        else:
-            assign_to_tab(name_A, tab_A_mem, 'a')
-        code.append("STORE b a")
-    else:
-        sym_A = get_sym(name_A)
-        skip_A = False
-        if str(tab_A_mem).isdigit() == False:
-            skip_A = True
-
-        if skip_A == False:
-            itr_A = sym_A[3] + (tab_A_mem - sym_A[1])
-            if sym_A[0] == True:
-                if itr_A < 0 or tab_A_mem > sym_A[2]:
-                    raise Exception("Index out of bounds in table: " + name_A)
-
-        code.append("( Init " + name_A + "=" + 'expression' + ' )')
-        code.append(name_B[1])
-        if skip_A == False:
-            code.append("RESET a")
-            prepare_num(itr_A, 'a', False)
-        else:
-            assign_to_tab(name_A, tab_A_mem, 'a')
-
-        code.append("STORE b a")
-
+        code.append(opp + "b e")
 
 
 
@@ -194,6 +197,7 @@ def p_program(p):
                     | BEGIN commands END
 
     '''
+    # print_memory()
     code.append("HALT")
     for el in code:
         print(el)
@@ -236,48 +240,20 @@ def p_command_assign(p):
     '''
         command         : identifier ASSIGN expression SEMICOLON
     '''
-    print(p[3])
     if p[1][0] == 'num':
         raise Exception("Nieprawidłowe przypisanie!")
-    if p[1][0] == 'pid':
-        if p[3][0] == 'num':
-            code.append("( Init " + p[1][1] + "=" + str(p[3][1]) + ' )')
-            code.append("RESET a")
-            off = get_sym(p[1][1])[3]
-            prepare_num(off, 'a', False)
-            code.append("RESET b")
-            prepare_num(p[3][1], 'b', False)
-            code.append("STORE b a")
-            code.append("RESET b")
-        elif if p[3][0] == 'expression':
-            pass
-        else:
-            prepare_assign(p[1][1], p[3][1], tab_B_mem=p[3][2])
 
-
-    elif p[1][0] == 'array':
-        if p[3][0] == 'num':
-            code.append("( Init " + p[1][1] + "=" + str(p[3][1]) + ' )')
-            code.append("RESET a")
-            off = get_sym(p[1][1])[3] + (p[1][2] - get_sym(p[1][1])[1])
-
-            prepare_num(off, 'a', False)
-            code.append("RESET b")
-            prepare_num(p[3][1], 'b', False)
-            code.append("STORE b a")
-            code.append("RESET b")
-        elif if p[3][0] == 'expression':
-            pass
-        else:
-            prepare_assign(p[1][1], p[3][1], tab_A_mem=p[1][2], tab_B_mem=p[3][2])
-
+    code.append("( Init " + str(p[1][1]) +  ' )')
+    # assign_to_mem(p[3][1], p[3][2])
+    load_var(p[1][1], p[1][2])
+    code.append("STORE b a")
 
 def p_command_assign_read(p):
     '''
         command         : READ identifier SEMICOLON
     '''
-    off = get_sym(p[2][0])[3]
-
+    off = get_sym(p[2][1])[3]
+    code.append("RESET a")
     prepare_num(off, 'a', False)
     code.append("GET a")
 
@@ -300,17 +276,17 @@ def p_command_write(p):
     code.append("( Write " + str(p[2][1]) + str(p[2][2]) + ' )')
     sym = get_sym(p[2][1])
     if p[2][0] == 'num':
-        code.append("RESET a")
+        # code.append("RESET a")
         prepare_num(p[2][1], 'a', False)
         code.append("PUT a")
 
     elif p[2][0] == 'pid':
-        code.append("RESET a")
+        # code.append("RESET a")
         prepare_num(sym[3], 'a', False)
         code.append("PUT a")
     elif p[2][0] == 'array':
         # TODO write p(a)
-        code.append("RESET a")
+        # code.append("RESET a")
         increment = p[2][2] - sym[1] + sym[3]
         prepare_num(increment, 'a', False)
         code.append("PUT a")
@@ -320,15 +296,18 @@ def p_expression_value(p):
         expression  : value
 
      '''
-     p[0] = p[1]
+     assign_to_mem(p[1][1], p[1][2])
 
 def p_expression_add(p):
      '''
         expression  : value ADD value
      '''
-     # code.append("ADD a")
      if p[1][0] == 'num' and p[3][0] == 'num':
-         p[0] = ('num', p[1][1] + p[3][1])
+        assign_to_mem(p[1][1] + p[3][1])
+     else:
+         math_opperation(p[1], p[3], "ADD ")
+
+
 
 
 def p_expression_sub(p):
@@ -336,13 +315,18 @@ def p_expression_sub(p):
         expression  : value SUB value
 
      '''
-     code.append("SUB a")
-     p[0] = p[1] - p[3]
+     if p[1][0] == 'num' and p[3][0] == 'num':
+        assign_to_mem(p[1][1] - p[3][1])
+     else:
+         math_opperation(p[1], p[3], "SUB ")
+
 
 def p_expression_mul(p):
     '''
         expression  : value MUL value
     '''
+    if p[1][0] == 'num' and p[3][0] == 'num':
+       assign_to_mem(p[1][1] * p[3][1])
     # if not p[1].isdigit()
     #     pass
     # if not p[3].isdigit()
@@ -367,11 +351,16 @@ def p_expression_div(p):
 
      '''
 
+     if p[1][0] == 'num' and p[3][0] == 'num':
+        assign_to_mem(p[1][1] // p[3][1])
+
 def p_expression_mod(p):
      '''
         expression  : value MOD value
 
      '''
+      if p[1][0] == 'num' and p[3][0] == 'num':
+         assign_to_mem(p[1][1] % p[3][1])
 
 
 def p_condition(p):
@@ -390,8 +379,7 @@ def p_value_num(p):
     '''
        value  : NUMBER
     '''
-    p[0] = ('num', p[1])
-    # prepare_num(p[1], 'a')
+    p[0] = ('num', p[1], -1)
 
 def p_value_identifier(p):
     '''
@@ -404,7 +392,7 @@ def p_identifier_pid(p):
        identifier  : pidentifier
     '''
     check_if_exists(p[1])
-    p[0] = ('pid', p[1], 0)
+    p[0] = ('pid', p[1], -1)
 
 def p_identifier_array(p):
     '''
@@ -426,8 +414,6 @@ def p_identifier_par(p):
     check_if_exists(p[1])
     check_if_exists(p[3])
     if get_sym(p[1])[0] == True:
-        # check_if_init(p[3])
-        #here prepre
         p[0] = ('array', p[1], p[3])
     else:
         raise Exception("Nie tablica!")
