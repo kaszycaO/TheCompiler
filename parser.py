@@ -10,14 +10,16 @@ sym_tab = {}
 data_offset = 0
 # for -> for_jmp
 labels = [('END', "")]
+command = {}
+prev_command_line = 0;
 code_offset = 0
 code = []
 
 
-def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset):
+def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, local=False):
     # print(sym_name," ",is_tab)
     if sym_name not in sym_tab:
-        sym_tab.update({sym_name: [is_tab, t_start, t_itr, offset]})
+        sym_tab.update({sym_name: [is_tab, t_start, t_itr, offset, local]})
     else:
         raise Exception("%s already defined!", sym_name)
 
@@ -27,10 +29,6 @@ def get_sym(sym_name):
 def check_if_exists(sym_name):
     if sym_name not in sym_tab:
         raise Exception("%s is undeclared", sym_name)
-
-def check_if_init(sym_name):
-    if get_sym(sym_name)[4] == -1:
-        raise Exception("%s is not initialized", sym_name)
 
 
 def data_location():
@@ -44,6 +42,22 @@ def gen_label():
 
 def get_label():
     return labels[-1]
+
+def create_temp_variable():
+    global sym_name
+    offset = data_location()
+    sym_name = "TEMP_" + str(offset)
+    sym_tab.update({sym_name: [0, 0, 0, offset, True]})
+    return offset
+
+def delete_temp_variable(sym_name):
+    del sym_tab[sym_name]
+
+def insert_code(helper, start_index):
+    global code
+    helper.reverse()
+    for el in helper:
+        code.insert(start_index, el)
 
 def prepare_num(num, register, store=True):
 
@@ -138,22 +152,28 @@ def math_opperation(arg_1, arg_2, opp):
         prepare_num(arg_1[1], 'b')
         load_var(arg_2[1], arg_2[2])
         code.append("LOAD a a")
-        code.append(opp + "b a")
+        code.append(opp + "a b")
+        code.append("RESET b")
+        code.append("ADD b a") # minus się wykrzaczył
 
     if arg_2[0] == 'num':
         prepare_num(arg_2[1], 'b')
         load_var(arg_1[1], arg_1[2])
         code.append("LOAD a a")
-        code.append(opp + "b a")
+        code.append(opp + "a b")
+        code.append("RESET b")
+        code.append("ADD b a")
 
     if arg_1[0] != 'num' and arg_2[0] != 'num':
         load_var(arg_1[1], arg_1[2])
-        code.append("RESET e")
-        code.append("LOAD e a")
+        code.append("RESET f")
+        code.append("LOAD f a")
         load_var(arg_2[1], arg_2[2])
         code.append("RESET b")
         code.append("LOAD b a")
-        code.append(opp + "b e")
+        code.append(opp + "f b")
+        code.append("RESET b")
+        code.append("ADD b f")
 
 def print_memory():
     global data_offset
@@ -171,6 +191,12 @@ def prepare_condition(value, register):
         code.append(("RESET " + register))
         code.append(("LOAD " + register + " a"))
 
+def delete_local_vars(sym_name):
+    global sym_tab
+
+    del sym_tab[sym_name]
+
+
 precedence = (
 
     ('left', 'ADD', 'SUB'),
@@ -185,7 +211,6 @@ def p_program(p):
                     | BEGIN commands END
 
     '''
-    # print_memory()
     code.append("HALT")
     for el in code:
         print(el)
@@ -219,12 +244,27 @@ def p_declarations_array(p):
     add_to_sym_tab(p[1], True, p[3], p[5] - p[3], data_location())
     data_offset += p[5] - p[3]
 
-def p_commands(p):
+def p_commands_comands(p):
     '''
         commands         : commands command
-                         | command
     '''
+    global prev_command_line
+
     p[0] = gen_label()
+    start = prev_command_line
+    prev_command_line = gen_label() + 1
+    command.update({p.linespan(2)[0] : start})
+
+def p_commands_comand(p):
+    '''
+        commands         : command
+    '''
+    global prev_command_line
+
+    p[0] = gen_label()
+    start = prev_command_line
+    prev_command_line = gen_label() + 1
+    command.update({p.linespan(1)[0] : start})
 
 def p_command_assign(p):
     '''
@@ -289,27 +329,120 @@ def p_command_repeat(p):
         command         :  REPEAT commands UNTIL condition SEMICOLON
     '''
     global code
+    start = command[p.linespan(2)[0]] - 1
     labels.pop(-1)
     while labels[-1][0] != "END":
-        # print("WHILE, ", labels)
         if labels[-1][1] == "commands_NO":
-            code[labels[-1][0]] = "JUMP " + str(gen_label() - labels[-1][0] + 1)
-        elif labels[-1][1] == "commands_START":
-            com = "JUMP -" + str(gen_label() - labels[-1][0])
-            code.append(com)
+            code[labels[-1][0]] = "JUMP -" + str(labels[-1][0] - start)
         elif labels[-1][1] == "commands_YES":
             code[labels[-1][0]] = "JUMP " + str(gen_label() - labels[-1][0])
         labels.pop(-1)
 
+def p_iterator(p):
+    '''
+        iterator : pidentifier
+    '''
+    add_to_sym_tab(p[1], False, 0, 0, data_location(), True)
+    p[0] = (p[1], gen_label())
+
 def p_command_for_to(p):
     '''
-        command         :  FOR pidentifier FROM value TO value DO commands ENDFOR
+        command         :  FOR iterator FROM value TO value DO commands ENDFOR
     '''
+    global code
+    helper = []
+    injection_index = gen_label()
+
+    # init
+    assign_to_mem(p[4][1], p[4][2])
+    load_var(p[2][0])
+    code.append("STORE b a")
+    if p[6][0] != 'num':
+        load_var(p[6][1], p[6][2])
+        code.append("LOAD d a")
+    else:
+        prepare_num(p[6][1], 'd')
+    off = create_temp_variable()
+    prepare_num(off, 'a')
+    code.append("STORE d a")
+
+    helper = code[injection_index:]
+    code = code[:injection_index]
+    insert_code(helper, p[2][1])
+
+    prepare_num(off, 'a')
+    code.append("LOAD d a")
+    load_var(p[2][0])
+    code.append("LOAD b a")
+    code.append("INC b")
+    code.append("STORE b a")
+
+    # warunek końca
+    code.append("RESET c")
+    code.append("ADD c d")
+    code.append("INC c") # i = <x, y>
+    code.append("LOAD a a")
+    code.append("SUB c a")
+    code.append("JZERO c 2")
+    code.append("JUMP -" + str(gen_label() - (p[2][1] + len(helper))))
+
+    delete_local_vars(p[2][0])
+    delete_temp_variable(("TEMP_" + str(off)))
+
+
+
 
 def p_command_for_downto(p):
     '''
-        command         : FOR pidentifier FROM value DOWNTO value DO commands ENDFOR
+        command         : FOR iterator FROM value DOWNTO value DO commands ENDFOR
     '''
+    global code
+    # TODO local global !!!!
+    # Nie można modyfikować 2. value w trakcie !!!!!!! / Nie działa zagnieżdżanie
+    helper = []
+    injection_index = gen_label()
+
+    # init
+    assign_to_mem(p[4][1], p[4][2])
+    load_var(p[2][0])
+    code.append("STORE b a")
+    if p[6][0] != 'num':
+        load_var(p[6][1], p[6][2])
+        code.append("LOAD d a")
+    else:
+        prepare_num(p[6][1], 'd')
+
+    off = create_temp_variable()
+    prepare_num(off, 'a')
+    code.append("STORE d a")
+
+    helper = code[injection_index:]
+    code = code[:injection_index]
+    insert_code(helper, p[2][1])
+
+    prepare_num(off, 'a')
+    code.append("LOAD d a")
+
+    # TODO load a improvement
+    load_var(p[2][0])
+
+    # warunek końca
+    code.append("RESET c")
+    code.append("LOAD a a")
+    code.append("ADD c a")
+    code.append("SUB c d")
+
+    # decrement
+    load_var(p[2][0])
+    code.append("LOAD b a")
+    code.append("DEC b")
+    code.append("STORE b a")
+
+    code.append("JZERO c 2")
+    code.append("JUMP -" + str(gen_label() - (p[2][1] + len(helper))))
+
+    delete_local_vars(p[2][0])
+    delete_temp_variable(("TEMP_" + str(off)))
 
 def p_command_read(p):
     '''
@@ -323,7 +456,7 @@ def p_command_write(p):
     '''
         command         :   WRITE value SEMICOLON
     '''
-
+    p[0] = gen_label()
     # TODO loadvar
     if p[2][0] == 'num':
         # code.append("RESET a")
@@ -363,7 +496,8 @@ def p_expression_sub(p):
 
      '''
      if p[1][0] == 'num' and p[3][0] == 'num':
-        assign_to_mem(p[1][1] - p[3][1])
+
+        assign_to_mem(max(p[1][1] - p[3][1], 0))
      else:
          math_opperation(p[1], p[3], "SUB ")
 
@@ -383,11 +517,12 @@ def p_expression_mul(p):
             load_var(p[3][1], p[3][2])
             code.append("LOAD a a")
             # warunek końca pętli
+            code.append("JZERO a 13")
             code.append("RESET e")
             code.append("INC e")
             code.append("SUB a e")
             # jeżeli a - 1 = 0
-            code.append("JZERO a 9")
+            code.append("JZERO a 10")
             code.append("INC a")
             # jeżeli a % 2 == 1 -> DEC a
             code.append("JODD a 4")
@@ -400,6 +535,7 @@ def p_expression_mul(p):
             code.append("ADD f b")
             # powrót do warunku pętli
             code.append("JUMP -9")
+            code.append("RESET b") # a = 0
             # dodanie temp
             code.append("ADD b f")
 
@@ -504,9 +640,10 @@ def p_expression_mod(p):
            prepare_num(p[3][1], 'a')
 
        # ALGORITM
-       code.append("JZERO a 13")
+       code.append("JZERO a 14")
        code.append("RESET e")
        code.append("ADD e b")
+       code.append("INC e")
        code.append("SUB e a")
        code.append("JZERO e 10")
        code.append("ADD b a")
@@ -528,14 +665,14 @@ def p_condition_eq(p):
 
      labels.append((gen_label(), "commands_START"))
      prepare_condition(p[1], 'b')
-     prepare_condition(p[3], 'd')
+     prepare_condition(p[3], 'f')
      code.append("RESET e")
      code.append("ADD e b")
-     code.append("SUB e d")
+     code.append("SUB e f")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_NO"))
      code.append("JUMP x") # <- nie
-     code.append("ADD e d")
+     code.append("ADD e f")
      code.append("SUB e b")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_NO"))
@@ -550,14 +687,14 @@ def p_condition_neq(p):
      '''
      labels.append((gen_label(), "commands_START"))
      prepare_condition(p[1], 'b')
-     prepare_condition(p[3], 'd')
+     prepare_condition(p[3], 'f')
      code.append("RESET e")
      code.append("ADD e b")
-     code.append("SUB e d")
+     code.append("SUB e f")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
      code.append("JUMP x") # <- tak
-     code.append("ADD e d")
+     code.append("ADD e f")
      code.append("SUB e b")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
@@ -574,10 +711,10 @@ def p_condition_gt(p):
 
      labels.append((gen_label(), "commands_START"))
      prepare_condition(p[1], 'b')
-     prepare_condition(p[3], 'd')
+     prepare_condition(p[3], 'f')
      code.append("RESET e")
      code.append("ADD e b")
-     code.append("SUB e d")
+     code.append("SUB e f")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
      code.append("JUMP x") # <- tak
@@ -593,9 +730,9 @@ def p_condition_lt(p):
 
      labels.append((gen_label(), "commands_START"))
      prepare_condition(p[1], 'b')
-     prepare_condition(p[3], 'd')
+     prepare_condition(p[3], 'f')
      code.append("RESET e")
-     code.append("ADD e d")
+     code.append("ADD e f")
      code.append("SUB e b")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
@@ -611,11 +748,11 @@ def p_condition_geq(p):
      '''
      labels.append((gen_label(), "commands_START"))
      prepare_condition(p[1], 'b')
-     prepare_condition(p[3], 'd')
+     prepare_condition(p[3], 'f')
      code.append("RESET e")
      code.append("ADD e b")
      code.append("INC e")
-     code.append("SUB e d")
+     code.append("SUB e f")
      code.append("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
      code.append("JUMP x") # <- tak
@@ -630,9 +767,9 @@ def p_condition_leq(p):
      '''
      labels.append((gen_label(), "commands_START"))
      prepare_condition(p[1], 'b')
-     prepare_condition(p[3], 'd')
+     prepare_condition(p[3], 'f')
      code.append("RESET e")
-     code.append("ADD e d")
+     code.append("ADD e f")
      code.append("INC e")
      code.append("SUB e b")
      code.append("JZERO e 2")
