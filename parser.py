@@ -92,10 +92,9 @@ def assign_to_tab(sym_name, arr, register):
     prepare_num(arr_off, register, False)
     code.append("RESET e")
     code.append("LOAD " + 'e' + " " + register)
-    # biorę p(a)
-    # jestem na p(0)
-    # przemyśleć!
-    # prepare_num(off - start, register, False)
+    # sym[3] + (arr - sym[1])
+    prepare_num(start, register, False)
+    code.append("SUB e " + register)
     prepare_num(off, register, False)
     # jestem na p(arr)
     code.append("ADD " + register + " " + 'e')
@@ -213,6 +212,7 @@ def p_program(p):
                     | BEGIN commands END
 
     '''
+    # print_memory()
     code.append("HALT")
     for el in code:
         print(el)
@@ -364,6 +364,13 @@ def p_command_for_to(p):
         code.append("LOAD d a")
     else:
         prepare_num(p[6][1], 'd')
+
+    code.append("RESET f")
+    code.append("ADD f d")
+    code.append("INC f")
+    code.append("SUB f b")
+    jump = (gen_label() - injection_index) + p[2][1]
+
     off = create_temp_variable()
     prepare_num(off, 'a')
     code.append("STORE d a")
@@ -387,7 +394,7 @@ def p_command_for_to(p):
     code.append("SUB c a")
     code.append("JZERO c 2")
     code.append("JUMP -" + str(gen_label() - (p[2][1] + len(helper))))
-
+    code.insert(jump, ("JZERO f " + str(gen_label() - jump + 1)))
     delete_local_vars(p[2][0])
     delete_temp_variable(("TEMP_" + str(off)))
 
@@ -412,6 +419,12 @@ def p_command_for_downto(p):
         code.append("LOAD d a")
     else:
         prepare_num(p[6][1], 'd')
+
+    code.append("RESET f")
+    code.append("ADD f b")
+    code.append("INC f")
+    code.append("SUB f d")
+    jump = (gen_label() - injection_index) + p[2][1]
 
     off = create_temp_variable()
     prepare_num(off, 'a')
@@ -441,6 +454,7 @@ def p_command_for_downto(p):
 
     code.append("JZERO c 2")
     code.append("JUMP -" + str(gen_label() - (p[2][1] + len(helper))))
+    code.insert(jump, ("JZERO f " + str(gen_label() - jump + 1)))
 
     delete_local_vars(p[2][0])
     delete_temp_variable(("TEMP_" + str(off)))
@@ -449,8 +463,8 @@ def p_command_read(p):
     '''
         command         : READ identifier SEMICOLON
     '''
-    off = get_sym(p[2][1])[3]
-    prepare_num(off, 'a', False)
+
+    load_var(p[2][1], p[2][2])
     code.append("GET a")
 
 def p_command_write(p):
