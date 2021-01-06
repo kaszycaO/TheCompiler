@@ -94,7 +94,9 @@ def assign_to_tab(sym_name, arr, register):
     code.append("LOAD " + 'e' + " " + register)
     # biorę p(a)
     # jestem na p(0)
-    prepare_num(off - start, register, False)
+    # przemyśleć!
+    # prepare_num(off - start, register, False)
+    prepare_num(off, register, False)
     # jestem na p(arr)
     code.append("ADD " + register + " " + 'e')
 
@@ -398,7 +400,6 @@ def p_command_for_downto(p):
     '''
     global code
     # TODO local global !!!!
-    # Nie można modyfikować 2. value w trakcie !!!!!!! / Nie działa zagnieżdżanie
     helper = []
     injection_index = gen_label()
 
@@ -548,18 +549,21 @@ def p_expression_mul(p):
                 temp = p[3][1]
                 load_var(p[1][1], p[3][2])
 
-            code.append("RESET b")
-            code.append("RESET f")
-            code.append("LOAD b a")
+            if temp != 0:
+                code.append("RESET b")
+                code.append("RESET f")
+                code.append("LOAD b a")
 
-            while temp != 1:
-                if temp % 2 == 1:
-                    code.append("ADD f b")
-                    temp = temp - 1
-                else:
-                    code.append("SHL b")
-                    temp = temp // 2
-            code.append("ADD b f")
+                while temp != 1:
+                    if temp % 2 == 1:
+                        code.append("ADD f b")
+                        temp = temp - 1
+                    else:
+                        code.append("SHL b")
+                        temp = temp // 2
+                code.append("ADD b f")
+            else:
+                code.append("RESET b")
 
 def p_expression_div(p):
      '''
@@ -591,26 +595,39 @@ def p_expression_div(p):
 
 
         # ALGORITM
+        # b / a : num / den
 
-        code.append("RESET e")
-        code.append("JZERO a 14")
-        code.append("INC b")
-        code.append("SUB b a")
-        code.append("JZERO b 11")
-        code.append("ADD b a")
-        code.append("DEC b")
-        # warunek końca pętli
-        code.append("RESET f")
+        # init
+        code.append("RESET d") # wynik (sprawdzić czy nie ma konfliktu)
+        code.append("JZERO a 23") # czy a = 0
+        code.append("RESET e") # place
+        code.append("INC e") # place
+
+        # pętla I
+        code.append("RESET f") # helper w pętli
+        code.append("ADD f b")
+        code.append("SHR f")
+        code.append("INC f")
+        code.append("SUB f a")
+        code.append("JZERO f 4") # wyjście z pętli
+        code.append("SHL e")
+        code.append("SHL a")
+        code.append("JUMP -8") # ponowne sprawdzenie warunku
+
+        # pętla II
+        code.append("JZERO e 11") # wyjście z pętli
+        code.append("RESET f") # helper w ifie
         code.append("ADD f b")
         code.append("INC f")
         code.append("SUB f a")
-        # jeżeli a - b = 0 zakończ
-        code.append("JZERO f 4")
-        code.append("SUB b a")
-        code.append("INC e")
-        code.append("JUMP -7")
+        code.append("JZERO f 3") # if nie
+        code.append("SUB b a") # if tak
+        code.append("ADD d e")
+        code.append("SHR e")
+        code.append("SHR a")
+        code.append("JUMP -10") # powrót na początek pętli
         code.append("RESET b")
-        code.append("ADD b e")
+        code.append("ADD b d") # wynik w b
 
 def p_expression_mod(p):
      '''
@@ -640,23 +657,36 @@ def p_expression_mod(p):
            prepare_num(p[3][1], 'a')
 
        # ALGORITM
-       code.append("JZERO a 14")
-       code.append("RESET e")
-       code.append("ADD e b")
-       code.append("INC e")
-       code.append("SUB e a")
-       code.append("JZERO e 10")
-       code.append("ADD b a")
-       # warunek końca pętli
-       code.append("RESET f")
+       # b / a : num / den
+
+       # init
+       code.append("JZERO a 22") # czy a = 0
+       code.append("RESET e") # place
+       code.append("INC e") # place
+       # pętla I
+       code.append("RESET f") # helper w pętli
+       code.append("ADD f b")
+       code.append("SHR f")
+       code.append("INC f")
+       code.append("SUB f a")
+       code.append("JZERO f 4") # wyjście z pętli
+       code.append("SHL e")
+       code.append("SHL a")
+       code.append("JUMP -8") # ponowne sprawdzenie warunku
+
+       # pętla II
+       code.append("JZERO e 11") # wyjście z pętli
+       code.append("RESET f") # helper w ifie
        code.append("ADD f b")
        code.append("INC f")
        code.append("SUB f a")
-       # jeżeli a - b = 0 zakończ
-       code.append("JZERO f 4")
-       code.append("SUB b a")
-       code.append("JUMP -6")
-       code.append("RESET b")
+       code.append("JZERO f 2") # if nie
+       code.append("SUB b a") # if tak
+       code.append("SHR e")
+       code.append("SHR a")
+       code.append("JUMP -9") # powrót na początek pętli
+       code.append("RESET b") # wynik w b
+
 
 def p_condition_eq(p):
      '''
