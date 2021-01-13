@@ -67,8 +67,7 @@ class OutOfBoundsError(Exception):
 
 #------------------------------ SYMBOL TABLE ----------------------------------#
 
-def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, local=False,
-                    initialized=False, modified=False):
+def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, local=False, initialized=False, modified=False):
 
     if sym_name not in sym_tab:
         sym_tab.update({sym_name: [is_tab, t_start, t_itr, offset, local, initialized, modified]})
@@ -172,11 +171,13 @@ def clear_code(index):
 
 def check_if_dead_code():
     global dead_code
+
     if len(dead_code) > 0:
+        temp = dead_code[0]
         for el in dead_code:
             if check_if_modified(el[0]):
                 return (False, -1)
-        return (True, el[1])
+        return (True, temp[1])
     else:
         return (False, -1)
 
@@ -207,7 +208,6 @@ def get_tab_value(sym_name, arr, register):
 
     off = sym[3]
     start = sym[1]
-    itr = sym[2]
 
     arr_sym = get_sym(arr)
     arr_off = arr_sym[3]
@@ -222,14 +222,14 @@ def get_tab_value(sym_name, arr, register):
     # jestem na p(arr)
     generate_code("ADD " + register + " " + 'e')
 
-def load_var(sym_name, arr=-1):
+def load_var(sym_name, arr=-1, register='a'):
 
     # sym_name (type, name, args)
     sym = get_sym(sym_name)
     # pid
     if arr == -1:
         itr = sym[3]
-        prepare_num(itr, 'a')
+        prepare_num(itr, register)
     else:
         if str(arr).isdigit():  # tab(const)
             itr = sym[3] + (arr - sym[1])
@@ -237,11 +237,11 @@ def load_var(sym_name, arr=-1):
             if itr < 0 or itr > sym[2] + sym[1] + sym[3]:
                 raise OutOfBoundsError(arr, sym_name)
 
-            prepare_num(itr, 'a')
+            prepare_num(itr, register)
 
 
         else:   # tab(pid)
-            get_tab_value(sym_name, arr, 'a')
+            get_tab_value(sym_name, arr, register)
 
 def assign_to_mem(sym_name, arr=-1):
 
@@ -295,53 +295,40 @@ def perform_add(arg_1, arg_2):
         generate_code("ADD b a")
 
     if arg_1[0] != 'num' and arg_2[0] != 'num':
-        load_var(arg_1[1], arg_1[2])
-        generate_code("RESET f")
-        generate_code("LOAD f a")
-        load_var(arg_2[1], arg_2[2])
-        generate_code("RESET b")
-        generate_code("LOAD b a")
-        generate_code("ADD f b")
-        generate_code("RESET b")
+        load_var(arg_1[1], arg_1[2], 'f')
+        generate_code("LOAD f f")
+        load_var(arg_2[1], arg_2[2], 'b')
+        generate_code("LOAD b b")
         generate_code("ADD b f")
 
 def perform_sub(arg_1, arg_2):
     # b musi być na outpucie
     if arg_1[0] == 'num':
-        prepare_num(arg_1[1], 'b')
         load_var(arg_2[1], arg_2[2])
         generate_code("LOAD a a")
-        generate_code("SUB a b")
-        generate_code("RESET b")
-        generate_code("ADD b a")
+        prepare_num(arg_1[1], 'b')
+        generate_code("SUB b a")
 
     if arg_2[0] == 'num':
-        prepare_num(arg_2[1], 'b')
-        load_var(arg_1[1], arg_1[2])
-        generate_code("LOAD a a")
-        generate_code("SUB a b")
-        generate_code("RESET b")
-        generate_code("ADD b a")
+        prepare_num(arg_2[1], 'a')
+        load_var(arg_1[1], arg_1[2], 'b')
+        generate_code("LOAD b b")
+        generate_code("SUB b a")
 
     if arg_1[0] != 'num' and arg_2[0] != 'num':
-        load_var(arg_1[1], arg_1[2])
-        generate_code("RESET f")
-        generate_code("LOAD f a")
-        load_var(arg_2[1], arg_2[2])
-        generate_code("RESET b")
-        generate_code("LOAD b a")
-        generate_code("SUB f b")
-        generate_code("RESET b")
-        generate_code("ADD b f")
+        load_var(arg_1[1], arg_1[2], 'b')
+        generate_code("LOAD b b")
+        load_var(arg_2[1], arg_2[2], 'f')
+        generate_code("LOAD f f")
+        generate_code("SUB b f")
 
 def prepare_condition(value, register):
 
     if value[0] == 'num':
         prepare_num(value[1], register)
     else:
-        load_var(value[1], value[2])
-        generate_code(("RESET " + register))
-        generate_code(("LOAD " + register + " a"))
+        load_var(value[1], value[2], register)
+        generate_code(("LOAD " + register + register))
 
 
 
@@ -522,13 +509,13 @@ def p_command_for_to(p):
 
     injection_index = gen_label()
 
-    # init
+    # init iterator
     assign_to_mem(p[4][1], p[4][2])
     load_var(p[2][0])
     generate_code("STORE b a")
     if p[6][0] != 'num':
-        load_var(p[6][1], p[6][2])
-        generate_code("LOAD d a")
+        load_var(p[6][1], p[6][2], 'd')
+        generate_code("LOAD d d")
     else:
         prepare_num(p[6][1], 'd')
 
@@ -536,19 +523,16 @@ def p_command_for_to(p):
     generate_code("ADD f d")
     generate_code("INC f")
     generate_code("SUB f b")
-    jump = (gen_label() - injection_index) + p[2][1]
 
+    jump = (gen_label() - injection_index) + p[2][1]
     off = create_temp_variable()
     prepare_num(off, 'a')
     generate_code("STORE d a")
 
-
-    # helper = code[injection_index:]
-    # code = code[:injection_index]
-
-    # insert_code(helper, p[2][1], injection_index)
     helper = insert_code(p[2][1], injection_index)
 
+
+    # koniec przedziału
     prepare_num(off, 'a')
     generate_code("LOAD d a")
     load_var(p[2][0])
@@ -581,8 +565,8 @@ def p_command_for_downto(p):
     load_var(p[2][0])
     generate_code("STORE b a")
     if p[6][0] != 'num':
-        load_var(p[6][1], p[6][2])
-        generate_code("LOAD d a")
+        load_var(p[6][1], p[6][2], 'd')
+        generate_code("LOAD d d")
     else:
         prepare_num(p[6][1], 'd')
 
@@ -595,10 +579,8 @@ def p_command_for_downto(p):
     off = create_temp_variable()
     prepare_num(off, 'a')
     generate_code("STORE d a")
-    # helper = code[injection_index:]
-    # code = code[:injection_index]
 
-    # insert_code(helper, p[2][1])
+
     helper = insert_code(p[2][1], injection_index)
 
     prepare_num(off, 'a')
@@ -650,7 +632,6 @@ def p_command_write(p):
         generate_code("PUT e")
 
     elif p[2][0] == 'pid':
-
         dead_code.append((p[2][1], gen_label()))
         sym = get_sym(p[2][1])
         prepare_num(sym[3], 'a')
@@ -701,17 +682,14 @@ def p_expression_mul(p):
        assign_to_mem(p[1][1] * p[3][1])
     else:
         if p[1][0] != 'num' and p[3][0] != 'num':
-            load_var(p[1][1], p[1][2])
-            generate_code("RESET b")
+            load_var(p[1][1], p[1][2], 'b')
             generate_code("RESET f")
-            generate_code("LOAD b a")
+            generate_code("LOAD b b")
             load_var(p[3][1], p[3][2])
             generate_code("LOAD a a")
             # warunek końca pętli
-            generate_code("JZERO a 13")
-            generate_code("RESET e")
-            generate_code("INC e")
-            generate_code("SUB a e")
+            generate_code("JZERO a 11")
+            generate_code("DEC a")
             # jeżeli a - 1 = 0
             generate_code("JZERO a 10")
             generate_code("INC a")
@@ -767,19 +745,17 @@ def p_expression_div(p):
         assign_to_mem(p[1][1] // p[3][1])
      else:
         if p[1][0] != 'num' and p[3][0] != 'num':
-            load_var(p[1][1], p[1][2])
-            generate_code("RESET b")
-            generate_code("LOAD b a")
+            load_var(p[1][1], p[1][2], 'd')
+            generate_code("LOAD d d")
             load_var(p[3][1], p[3][2])
             generate_code("LOAD a a")
         if p[1][0] == 'num':
-            prepare_num(p[1][1], 'b')
+            prepare_num(p[1][1], 'd')
             load_var(p[3][1], p[3][2])
             generate_code("LOAD a a")
         if p[3][0] == 'num':
-            load_var(p[1][1], p[1][2])
-            generate_code("RESET b")
-            generate_code("LOAD b a")
+            load_var(p[1][1], p[1][2], 'd')
+            generate_code("LOAD d d")
             prepare_num(p[3][1], 'a')
 
 
@@ -787,14 +763,14 @@ def p_expression_div(p):
         # b / a : num / den
 
         # init
-        generate_code("RESET d") # wynik (sprawdzić czy nie ma konfliktu)
+        generate_code("RESET b") # wynik
         generate_code("JZERO a 23") # czy a = 0
         generate_code("RESET e") # place
         generate_code("INC e") # place
 
         # pętla I
         generate_code("RESET f") # helper w pętli
-        generate_code("ADD f b")
+        generate_code("ADD f d")
         generate_code("SHR f")
         generate_code("INC f")
         generate_code("SUB f a")
@@ -806,18 +782,16 @@ def p_expression_div(p):
         # pętla II
         generate_code("JZERO e 11") # wyjście z pętli
         generate_code("RESET f") # helper w ifie
-        generate_code("ADD f b")
+        generate_code("ADD f d")
         generate_code("INC f")
         generate_code("SUB f a")
         generate_code("JZERO f 3") # if nie
-        generate_code("SUB b a") # if tak
-        generate_code("ADD d e")
+        generate_code("SUB d a") # if tak
+        generate_code("ADD b e")
         generate_code("SHR e")
         generate_code("SHR a")
-        generate_code("JUMP -10") # powrót na początek pętli
-        generate_code("RESET b")
-         # wynik w b
-        generate_code("ADD b d")
+        # powrót na początek pętli
+        generate_code("JUMP -10")
 
 def p_expression_mod(p):
      '''
@@ -830,9 +804,8 @@ def p_expression_mod(p):
         assign_to_mem(p[1][1] % p[3][1])
      else:
        if p[1][0] != 'num' and p[3][0] != 'num':
-           load_var(p[1][1], p[1][2])
-           generate_code("RESET b")
-           generate_code("LOAD b a")
+           load_var(p[1][1], p[1][2], 'b')
+           generate_code("LOAD b b")
            load_var(p[3][1], p[3][2])
            generate_code("LOAD a a")
        if p[1][0] == 'num':
@@ -840,9 +813,8 @@ def p_expression_mod(p):
            load_var(p[3][1], p[3][2])
            generate_code("LOAD a a")
        if p[3][0] == 'num':
-           load_var(p[1][1], p[1][2])
-           generate_code("RESET b")
-           generate_code("LOAD b a")
+           load_var(p[1][1], p[1][2], 'b')
+           generate_code("LOAD b b")
            prepare_num(p[3][1], 'a')
 
        # ALGORITM
