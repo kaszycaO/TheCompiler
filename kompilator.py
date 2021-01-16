@@ -27,6 +27,17 @@ prev_command_line = 0;
 dead_code = []
 code_start = 0
 
+# registers
+
+regs_status = {
+    'a' : 0,
+    'b' : 0,
+    'c' : 0,
+    'd' : 0,
+    'e' : 0,
+    'f' : 0,
+}
+
 # comments
 comments = []
 
@@ -49,8 +60,8 @@ class SyntaxError(Exception):
     def __init__(self, line, value):
 
         message = "\n" + ERROR
-        message += "Nieprawidłowy znak w linii " + str(line) + \
-                        ": " + str(value)
+        message += "Nieprawidłowy znak: '" + str(value) + "' w linii " + str(line)
+
         self.message = message
         super().__init__(self.message)
 
@@ -67,10 +78,10 @@ class OutOfBoundsError(Exception):
 
 #------------------------------ SYMBOL TABLE ----------------------------------#
 
-def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, local=False, initialized=False, modified=False):
+def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, used=False, initialized=False, modified=0, value=-1, local=False):
 
     if sym_name not in sym_tab:
-        sym_tab.update({sym_name: [is_tab, t_start, t_itr, offset, local, initialized, modified]})
+        sym_tab.update({sym_name: [is_tab, t_start, t_itr, offset, used, initialized, modified, value, local]})
     else:
         raise FatalError("Zmienna została już zadeklarowana: ", sym_name)
 
@@ -87,7 +98,63 @@ def make_initialized(sym_name):
 
 def make_modified(sym_name):
     global sym_tab
-    sym_tab[sym_name][6] = True
+    sym_tab[sym_name][6] += 1
+
+def check_if_val_possible(sym_name):
+    global sym_tab
+
+    if sym_name in sym_tab:
+        mod = sym_tab[sym_name][6]
+        if mod == 1:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+def check_if_used(sym_name):
+    global sym_tab
+    return sym_tab[sym_name][4]
+
+def make_used(sym_name):
+    global sym_tab
+    if sym_name in sym_tab:
+        sym_tab[sym_name][4] = True
+
+def add_value_to_sym_tab(sym_name, value, index=-1):
+    global sym_tab
+    if value != -1:
+        if index == -1:
+            sym_tab[sym_name][7] = value
+        else:
+            mod_index = index - sym_tab[sym_name][1]
+            if sym_tab[sym_name][2] < 20:
+                if sym_tab[sym_name][7] == -1:
+                    sym_tab[sym_name][7] = [ None for i in range(sym_tab[sym_name][2] + 1) ]
+                    sym_tab[sym_name][7][mod_index] = value
+                else:
+                    sym_tab[sym_name][7][mod_index] = value
+
+def get_value(sym_name, index=-1):
+    global sym_tab
+    if not str(sym_name).isdigit():
+        if check_if_val_possible(sym_name):
+            if index == -1: # PID
+                return sym_tab[sym_name][7]
+            else: # TAB
+                if sym_tab[sym_name][7] != -1:
+                    if str(index).isdigit():
+                        mod_index = index - sym_tab[sym_name][1]
+                        return sym_tab[sym_name][7][mod_index]
+                    else:
+                        val = get_value(index)
+                        if val != -1:
+                            mod_index = val - sym_tab[sym_name][1]
+                            return sym_tab[sym_name][7][mod_index]
+        return -1
+
+    else:
+        return sym_name
 
 def check_if_initialized(sym_name, line):
     global sym_tab
@@ -99,7 +166,11 @@ def check_if_initialized(sym_name, line):
 def check_if_modified(sym_name):
     global sym_tab
     if sym_name in sym_tab:
-        return sym_tab[sym_name][6]
+        mod = sym_tab[sym_name][6]
+        if mod == 0:
+            return False
+        else:
+            return True
     else:
         return True
 
@@ -181,12 +252,56 @@ def check_if_dead_code():
     else:
         return (False, -1)
 
+def expand_loop(code, itr):
+    global code_start
+
+    if itr < 0:
+        return -1
+    elif itr == 0:
+        return 0
+    else:
+        for i in range(itr):
+            for el in code:
+                generate_code(el)
+                if el == "GET a":
+                    code_start = gen_label()
+        return 1
+
+def check_if_expand(val_1, val_2, type):
+
+    if val_1[0] == "num" and val_2[0] == "num":
+        if type == "TO":
+            itr = val_2[1] - val_1[1]
+        else:
+            itr = val_1[1] - val_2[1]
+    else:
+        check_1 = get_value(val_1[1], val_1[2])
+        check_2 = get_value(val_2[1], val_1[2])
+        if check_1 == -1 or check_2 == -1:
+            return (False, -1)
+        if type == "TO":
+            itr = check_2 - check_1
+        else:
+            itr = check_1 - check_2
+
+    if itr < 21:
+        return (True, itr)
+    else:
+        return (False, -1)
+
+def update_register(register, value):
+    global regs_status
+
+    regs_status[register] = value
+
 
 #-------------------     VARIABLES & MEMORY   ---------------------------------#
 
 def prepare_num(num, register):
 
+
     generate_code(("RESET " + register))
+        # update_register(register, 0)
     helper = []
     while num != 0:
         if num % 2 == 1:
@@ -200,6 +315,32 @@ def prepare_num(num, register):
         helper.reverse()
         for el in helper:
             generate_code(el)
+
+def prepare_best_num(value, register):
+    global regs_status
+    best = register
+    print(register, " INIT ", value)
+    val = abs(regs_status[register] - value)
+    true_value = value - regs_status[register]
+    for el in regs_status:
+        check = abs(regs_status[el] - value)
+        if check < val:
+            best = el
+            val = check
+            true_value = regs_status[el] - value
+    print(best, " BEST ", val)
+    if val < 20 and best != register:
+        # update_register(best, value)
+        generate_code("RESET " + best)
+        if true_value >= 0:
+            for _ in range(val):
+                generate_code("INC " + best)
+        else:
+            for _ in range(val):
+                generate_code("DEC " + best)
+    else:
+        prepare_num(value, register)
+        # update_register(register, value)
 
 def get_tab_value(sym_name, arr, register):
 
@@ -270,10 +411,11 @@ def assign_to_mem(sym_name, arr=-1):
         generate_code("LOAD b a")
 
 def print_memory():
-    global data_offset
+    global data_offsetload
 
     # ONLY FOR DEBUGING
     generate_code("RESET a")
+
     for _ in range(data_offset + 1):
         generate_code("PUT a")
         generate_code("INC a")
@@ -283,18 +425,34 @@ def print_memory():
 def perform_add(arg_1, arg_2):
     # b musi być na outpucie
     if arg_1[0] == 'num':
-        prepare_num(arg_1[1], 'b')
-        load_var(arg_2[1], arg_2[2])
-        generate_code("LOAD a a")
-        generate_code("ADD b a")
+        make_used(arg_2[1])
+        if arg_1[1] < 20:
+            load_var(arg_2[1], arg_2[2], 'b')
+            generate_code("LOAD b b")
+            for _ in range(arg_1[1]):
+                generate_code("INC b")
+        else:
+            prepare_num(arg_1[1], 'b')
+            load_var(arg_2[1], arg_2[2])
+            generate_code("LOAD a a")
+            generate_code("ADD b a")
 
     if arg_2[0] == 'num':
-        prepare_num(arg_2[1], 'b')
-        load_var(arg_1[1], arg_1[2])
-        generate_code("LOAD a a")
-        generate_code("ADD b a")
+        make_used(arg_1[1])
+        if arg_2[1] < 20:
+            load_var(arg_1[1], arg_1[2], 'b')
+            generate_code("LOAD b b")
+            for _ in range(arg_2[1]):
+                generate_code("INC b")
+        else:
+            prepare_num(arg_2[1], 'b')
+            load_var(arg_1[1], arg_1[2])
+            generate_code("LOAD a a")
+            generate_code("ADD b a")
 
     if arg_1[0] != 'num' and arg_2[0] != 'num':
+        make_used(arg_1[1])
+        make_used(arg_2[1])
         load_var(arg_1[1], arg_1[2], 'f')
         generate_code("LOAD f f")
         load_var(arg_2[1], arg_2[2], 'b')
@@ -304,18 +462,28 @@ def perform_add(arg_1, arg_2):
 def perform_sub(arg_1, arg_2):
     # b musi być na outpucie
     if arg_1[0] == 'num':
+        make_used(arg_2[1])
         load_var(arg_2[1], arg_2[2])
         generate_code("LOAD a a")
         prepare_num(arg_1[1], 'b')
         generate_code("SUB b a")
 
     if arg_2[0] == 'num':
-        prepare_num(arg_2[1], 'a')
-        load_var(arg_1[1], arg_1[2], 'b')
-        generate_code("LOAD b b")
-        generate_code("SUB b a")
+        make_used(arg_1[1])
+        if arg_2[1] < 20:
+            load_var(arg_1[1], arg_1[2], 'b')
+            generate_code("LOAD b b")
+            for _ in range(arg_2[1]):
+                generate_code("DEC b")
+        else:
+            prepare_num(arg_2[1], 'a')
+            load_var(arg_1[1], arg_1[2], 'b')
+            generate_code("LOAD b b")
+            generate_code("SUB b a")
 
     if arg_1[0] != 'num' and arg_2[0] != 'num':
+        make_used(arg_1[1])
+        make_used(arg_2[1])
         load_var(arg_1[1], arg_1[2], 'b')
         generate_code("LOAD b b")
         load_var(arg_2[1], arg_2[2], 'f')
@@ -327,8 +495,9 @@ def prepare_condition(value, register):
     if value[0] == 'num':
         prepare_num(value[1], register)
     else:
+        make_used(value[1])
         load_var(value[1], value[2], register)
-        generate_code(("LOAD " + register + register))
+        generate_code(("LOAD " + register + " " + register))
 
 
 
@@ -349,6 +518,7 @@ def p_program(p):
         program     : DECLARE declarations BEGIN commands END
                     | BEGIN commands END
     '''
+    print(sym_tab)
     dead = check_if_dead_code()
     if dead[0]:
         clear_code(dead[1])
@@ -421,8 +591,16 @@ def p_command_assign(p):
     if p[1][0] == 'num':
         raise FatalError("Nieprawidłowe przypisanie w linii: ", p.lineno(1))
 
-    if get_sym(p[1][1])[4] == True:
+    if get_sym(p[1][1])[8] == True:
         raise FatalError("Nadpisanie zmiennej lokalnej w linii: ", p.lineno(1))
+
+    # Tab
+    if p[1][2] != -1:
+        val = get_value(p[1][2])
+        if val != -1:
+            add_value_to_sym_tab(p[1][1], p[3], val)
+    else: #PID / NUM
+        add_value_to_sym_tab(p[1][1], p[3], p[1][2])
 
     load_var(p[1][1], p[1][2])
     generate_code("STORE b a")
@@ -452,7 +630,6 @@ def p_command_if(p):
 
     labels.pop(-1)
     while labels[-1][0] != "END":
-        # print("IF, ", labels)
         if labels[-1][1] == "commands_NO":
             code[labels[-1][0]] = "JUMP " + str(gen_label() - labels[-1][0])
         elif labels[-1][1] == "commands_YES":
@@ -466,7 +643,6 @@ def p_command_while(p):
     global code
     labels.pop(-1)
     while labels[-1][0] != "END":
-        # print("WHILE, ", labels)
         if labels[-1][1] == "commands_NO":
             code[labels[-1][0]] = "JUMP " + str(gen_label() - labels[-1][0] + 1)
         elif labels[-1][1] == "commands_START":
@@ -494,7 +670,7 @@ def p_iterator(p):
     '''
         iterator : pidentifier
     '''
-    add_to_sym_tab(p[1], False, 0, 0, data_location(), True)
+    add_to_sym_tab(p[1], False, 0, 0, data_location(), False, local=True)
     make_initialized(p[1])
     p[0] = (p[1], gen_label())
 
@@ -508,49 +684,55 @@ def p_command_for_to(p):
         raise FatalError("Użycie niezadeklarowanej zmiennej w pętli w linii: ", p.lineno(1))
 
     injection_index = gen_label()
-
-    # init iterator
-    assign_to_mem(p[4][1], p[4][2])
-    load_var(p[2][0])
-    generate_code("STORE b a")
-    if p[6][0] != 'num':
-        load_var(p[6][1], p[6][2], 'd')
-        generate_code("LOAD d d")
+    expand = check_if_expand(p[4], p[6], "TO")
+    if expand[0] and check_if_used(p[2][0]) == False:
+        e = expand_loop(code[p[2][1]:injection_index], expand[1])
+        if e == -1:
+            code = code[:p[2][1]]
+        delete_local_vars(p[2][0])
     else:
-        prepare_num(p[6][1], 'd')
+        # init iterator
+        assign_to_mem(p[4][1], p[4][2])
+        load_var(p[2][0])
+        generate_code("STORE b a")
+        if p[6][0] != 'num':
+            load_var(p[6][1], p[6][2], 'd')
+            generate_code("LOAD d d")
+        else:
+            prepare_num(p[6][1], 'd')
 
-    generate_code("RESET f")
-    generate_code("ADD f d")
-    generate_code("INC f")
-    generate_code("SUB f b")
+        generate_code("RESET f")
+        generate_code("ADD f d")
+        generate_code("INC f")
+        generate_code("SUB f b")
 
-    jump = (gen_label() - injection_index) + p[2][1]
-    off = create_temp_variable()
-    prepare_num(off, 'a')
-    generate_code("STORE d a")
+        jump = (gen_label() - injection_index) + p[2][1]
+        off = create_temp_variable()
+        prepare_num(off, 'a')
+        generate_code("STORE d a")
 
-    helper = insert_code(p[2][1], injection_index)
+        helper = insert_code(p[2][1], injection_index)
 
 
-    # koniec przedziału
-    prepare_num(off, 'a')
-    generate_code("LOAD d a")
-    load_var(p[2][0])
-    generate_code("LOAD b a")
-    generate_code("INC b")
-    generate_code("STORE b a")
+        # koniec przedziału
+        prepare_num(off, 'a')
+        generate_code("LOAD d a")
+        load_var(p[2][0])
+        generate_code("LOAD b a")
+        generate_code("INC b")
+        generate_code("STORE b a")
 
-    # warunek końca
-    generate_code("RESET c")
-    generate_code("ADD c d")
-    generate_code("INC c") # i = <x, y>
-    generate_code("LOAD a a")
-    generate_code("SUB c a")
-    generate_code("JZERO c 2")
-    generate_code("JUMP -" + str(gen_label() - (p[2][1] + helper)))
-    code.insert(jump, ("JZERO f " + str(gen_label() - jump + 1)))
-    delete_local_vars(p[2][0])
-    delete_temp_variable(("TEMP_" + str(off)))
+        # warunek końca
+        generate_code("RESET c")
+        generate_code("ADD c d")
+        generate_code("INC c") # i = <x, y>
+        generate_code("LOAD a a")
+        generate_code("SUB c a")
+        generate_code("JZERO c 2")
+        generate_code("JUMP -" + str(gen_label() - (p[2][1] + helper)))
+        code.insert(jump, ("JZERO f " + str(gen_label() - jump + 1)))
+        delete_local_vars(p[2][0])
+        delete_temp_variable(("TEMP_" + str(off)))
 
 def p_command_for_downto(p):
     '''
@@ -560,59 +742,70 @@ def p_command_for_downto(p):
 
     injection_index = gen_label()
 
-    # init
-    assign_to_mem(p[4][1], p[4][2])
-    load_var(p[2][0])
-    generate_code("STORE b a")
-    if p[6][0] != 'num':
-        load_var(p[6][1], p[6][2], 'd')
-        generate_code("LOAD d d")
+    expand = check_if_expand(p[4], p[6], "DOWNTO")
+    if expand[0] and check_if_used(p[2][0]) == False:
+        e = expand_loop(code[p[2][1]:injection_index], expand[1])
+        if e == -1:
+            code = code[:p[2][1]]
+        delete_local_vars(p[2][0])
     else:
-        prepare_num(p[6][1], 'd')
+        # init
+        assign_to_mem(p[4][1], p[4][2])
+        load_var(p[2][0])
+        generate_code("STORE b a")
+        if p[6][0] != 'num':
+            load_var(p[6][1], p[6][2], 'd')
+            generate_code("LOAD d d")
+        else:
+            prepare_num(p[6][1], 'd')
 
-    generate_code("RESET f")
-    generate_code("ADD f b")
-    generate_code("INC f")
-    generate_code("SUB f d")
-    jump = (gen_label() - injection_index) + p[2][1]
+        generate_code("RESET f")
+        generate_code("ADD f b")
+        generate_code("INC f")
+        generate_code("SUB f d")
+        jump = (gen_label() - injection_index) + p[2][1]
 
-    off = create_temp_variable()
-    prepare_num(off, 'a')
-    generate_code("STORE d a")
+        off = create_temp_variable()
+        prepare_num(off, 'a')
+        generate_code("STORE d a")
 
 
-    helper = insert_code(p[2][1], injection_index)
+        helper = insert_code(p[2][1], injection_index)
 
-    prepare_num(off, 'a')
-    generate_code("LOAD d a")
+        prepare_num(off, 'a')
+        generate_code("LOAD d a")
 
-    # TODO load a improvement
-    load_var(p[2][0])
+        # TODO load a improvement
+        load_var(p[2][0])
 
-    # warunek końca
-    generate_code("RESET c")
-    generate_code("LOAD a a")
-    generate_code("ADD c a")
-    generate_code("SUB c d")
+        # warunek końca
+        generate_code("RESET c")
+        generate_code("LOAD a a")
+        generate_code("ADD c a")
+        generate_code("SUB c d")
 
-    # decrement
-    load_var(p[2][0])
-    generate_code("LOAD b a")
-    generate_code("DEC b")
-    generate_code("STORE b a")
+        # decrement
+        load_var(p[2][0])
+        generate_code("LOAD b a")
+        generate_code("DEC b")
+        generate_code("STORE b a")
 
-    generate_code("JZERO c 2")
-    generate_code("JUMP -" + str(gen_label() - (p[2][1] + helper)))
-    code.insert(jump, ("JZERO f " + str(gen_label() - jump + 1)))
+        generate_code("JZERO c 2")
+        generate_code("JUMP -" + str(gen_label() - (p[2][1] + helper)))
+        code.insert(jump, ("JZERO f " + str(gen_label() - jump + 1)))
 
-    delete_local_vars(p[2][0])
-    delete_temp_variable(("TEMP_" + str(off)))
+        delete_local_vars(p[2][0])
+        delete_temp_variable(("TEMP_" + str(off)))
 
 def p_command_read(p):
     '''
         command         : READ identifier SEMICOLON
     '''
     global code_start
+
+    if get_sym(p[2][1])[8] == True:
+        raise FatalError("Nadpisanie zmiennej lokalnej w linii: ", p.lineno(1))
+
     load_var(p[2][1], p[2][2])
     generate_code("GET a")
     make_initialized(p[2][1])
@@ -648,9 +841,19 @@ def p_expression_value(p):
 
      '''
      if p[1][0] != 'num':
+         make_used(p[1][1])
          check_if_initialized(p[1][1], p.lineno(1))
          if p[1][0] == 'array' and str(p[1][2]).isdigit() == False:
              check_if_initialized(p[1][2], p.lineno(1))
+
+         val = get_value(p[1][1], p[1][2])
+         if val != -1:
+            p[0] = val
+         else:
+             p[0] = -1
+     else:
+         p[0] = p[1][1]
+
      assign_to_mem(p[1][1], p[1][2])
 
 def p_expression_add(p):
@@ -659,8 +862,10 @@ def p_expression_add(p):
      '''
      if p[1][0] == 'num' and p[3][0] == 'num':
         assign_to_mem(p[1][1] + p[3][1])
+        p[0] = p[1][1] + p[3][1]
      else:
-         perform_add(p[1], p[3])
+        perform_add(p[1], p[3])
+        p[0] = -1
 
 def p_expression_sub(p):
      '''
@@ -668,20 +873,32 @@ def p_expression_sub(p):
 
      '''
      if p[1][0] == 'num' and p[3][0] == 'num':
-
         assign_to_mem(max(p[1][1] - p[3][1], 0))
+        p[0] = max(p[1][1] - p[3][1], 0)
      else:
+         val_1 = get_value(p[1][1], p[1][2])
+         val_2 = get_value(p[3][1], p[3][2])
          perform_sub(p[1], p[3])
+         # if val_1 != -1 and val_2 != -1:
+         #     p[0] = max(val_1 - val_2, 0)
+         # else:
+         p[0] = -1
 
 def p_expression_mul(p):
     '''
         expression  : value MUL value
     '''
+    val_1 = get_value(p[1][1], p[1][2])
+    val_2 = get_value(p[3][1], p[3][2])
 
-    if p[1][0] == 'num' and p[3][0] == 'num':
-       assign_to_mem(p[1][1] * p[3][1])
+    if (p[1][0] == 'num' and p[3][0] == 'num'):
+        assign_to_mem(p[1][1] * p[3][1])
+        p[0] = p[1][1] * p[3][1]
     else:
+        p[0] = -1
         if p[1][0] != 'num' and p[3][0] != 'num':
+            make_used(p[1][1])
+            make_used(p[3][1])
             load_var(p[1][1], p[1][2], 'b')
             generate_code("RESET f")
             generate_code("LOAD b b")
@@ -711,9 +928,11 @@ def p_expression_mul(p):
         else:
             helper = []
             if p[1][0] == 'num':
+                make_used(p[3][1])
                 temp = p[1][1]
                 load_var(p[3][1], p[3][2])
             else:
+                make_used(p[1][1])
                 temp = p[3][1]
                 load_var(p[1][1], p[3][2])
 
@@ -738,25 +957,33 @@ def p_expression_div(p):
         expression  : value DIV value
 
      '''
-
+     val_1 = get_value(p[1][1], p[1][2])
+     val_2 = get_value(p[3][1], p[3][2])
      if p[1][1] == 0 or p[3][1] == 0:
          assign_to_mem(0)
+         p[0] = 0
      elif p[1][0] == 'num' and p[3][0] == 'num':
         assign_to_mem(p[1][1] // p[3][1])
+        p[0] = p[1][1] // p[3][1]
      else:
+        p[0] = -1
         if p[1][0] != 'num' and p[3][0] != 'num':
             load_var(p[1][1], p[1][2], 'd')
             generate_code("LOAD d d")
             load_var(p[3][1], p[3][2])
             generate_code("LOAD a a")
+            make_used(p[1][1])
+            make_used(p[3][1])
         if p[1][0] == 'num':
             prepare_num(p[1][1], 'd')
             load_var(p[3][1], p[3][2])
             generate_code("LOAD a a")
+            make_used(p[3][1])
         if p[3][0] == 'num':
             load_var(p[1][1], p[1][2], 'd')
             generate_code("LOAD d d")
             prepare_num(p[3][1], 'a')
+            make_used(p[1][1])
 
 
         # ALGORITM
@@ -800,22 +1027,29 @@ def p_expression_mod(p):
      '''
      if p[1][1] == 0 or p[3][1] == 0:
          assign_to_mem(0)
+         p[0] = 0
      elif p[1][0] == 'num' and p[3][0] == 'num':
         assign_to_mem(p[1][1] % p[3][1])
+        p[0] = p[1][1] % p[3][1]
      else:
+       p[0] = -1
        if p[1][0] != 'num' and p[3][0] != 'num':
            load_var(p[1][1], p[1][2], 'b')
            generate_code("LOAD b b")
            load_var(p[3][1], p[3][2])
            generate_code("LOAD a a")
+           make_used(p[1][1])
+           make_used(p[3][1])
        if p[1][0] == 'num':
            prepare_num(p[1][1], 'b')
            load_var(p[3][1], p[3][2])
            generate_code("LOAD a a")
+           make_used(p[3][1])
        if p[3][0] == 'num':
            load_var(p[1][1], p[1][2], 'b')
            generate_code("LOAD b b")
            prepare_num(p[3][1], 'a')
+           make_used(p[1][1])
 
        # ALGORITM
        # b / a : num / den
@@ -969,7 +1203,7 @@ def p_condition_leq(p):
      labels.append((gen_label(), "commands_YES"))
      generate_code("JUMP x") # <- tak
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie (potencjalne przyspieszenie)
+     generate_code("JUMP x") # <- nie
      labels.append(("END", ""))
      p[0] = gen_label()
 
@@ -1020,8 +1254,14 @@ def p_identifier_par(p):
     '''
     check_if_exists(p[1])
     check_if_exists(p[3])
+    make_used(p[3])
+    make_used(p[1])
     if get_sym(p[1])[0] == True:
-        p[0] = ('array', p[1], p[3])
+        val = get_value(p[3])
+        if val == -1:
+            p[0] = ('array', p[1], p[3])
+        else:
+            p[0] = ('array', p[1], val)
     else:
         raise FatalError(("Zmienna " + str(p[1]) + " nie jest tablicą. Linia: "), p.lineno(1))
 
