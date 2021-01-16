@@ -27,17 +27,6 @@ prev_command_line = 0;
 dead_code = []
 code_start = 0
 
-# registers
-
-regs_status = {
-    'a' : 0,
-    'b' : 0,
-    'c' : 0,
-    'd' : 0,
-    'e' : 0,
-    'f' : 0,
-}
-
 # comments
 comments = []
 
@@ -289,11 +278,6 @@ def check_if_expand(val_1, val_2, type):
     else:
         return (False, -1)
 
-def update_register(register, value):
-    global regs_status
-
-    regs_status[register] = value
-
 
 #-------------------     VARIABLES & MEMORY   ---------------------------------#
 
@@ -315,32 +299,6 @@ def prepare_num(num, register):
         helper.reverse()
         for el in helper:
             generate_code(el)
-
-def prepare_best_num(value, register):
-    global regs_status
-    best = register
-    print(register, " INIT ", value)
-    val = abs(regs_status[register] - value)
-    true_value = value - regs_status[register]
-    for el in regs_status:
-        check = abs(regs_status[el] - value)
-        if check < val:
-            best = el
-            val = check
-            true_value = regs_status[el] - value
-    print(best, " BEST ", val)
-    if val < 20 and best != register:
-        # update_register(best, value)
-        generate_code("RESET " + best)
-        if true_value >= 0:
-            for _ in range(val):
-                generate_code("INC " + best)
-        else:
-            for _ in range(val):
-                generate_code("DEC " + best)
-    else:
-        prepare_num(value, register)
-        # update_register(register, value)
 
 def get_tab_value(sym_name, arr, register):
 
