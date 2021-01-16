@@ -27,6 +27,17 @@ prev_command_line = 0;
 dead_code = []
 code_start = 0
 
+# registers
+
+regs_status = {
+    'a' : 0,
+    'b' : 0,
+    'c' : 0,
+    'd' : 0,
+    'e' : 0,
+    'f' : 0,
+}
+
 # comments
 comments = []
 
@@ -67,7 +78,7 @@ class OutOfBoundsError(Exception):
 
 #------------------------------ SYMBOL TABLE ----------------------------------#
 
-def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, used=False, initialized=False, modified=False, value=-1, local=False):
+def add_to_sym_tab(sym_name, is_tab, t_start, t_itr, offset, used=False, initialized=False, modified=0, value=-1, local=False):
 
     if sym_name not in sym_tab:
         sym_tab.update({sym_name: [is_tab, t_start, t_itr, offset, used, initialized, modified, value, local]})
@@ -87,7 +98,19 @@ def make_initialized(sym_name):
 
 def make_modified(sym_name):
     global sym_tab
-    sym_tab[sym_name][6] = True
+    sym_tab[sym_name][6] += 1
+
+def check_if_val_possible(sym_name):
+    global sym_tab
+
+    if sym_name in sym_tab:
+        mod = sym_tab[sym_name][6]
+        if mod == 1:
+            return True
+        else:
+            return False
+    else:
+        return False
 
 def check_if_used(sym_name):
     global sym_tab
@@ -95,7 +118,8 @@ def check_if_used(sym_name):
 
 def make_used(sym_name):
     global sym_tab
-    sym_tab[sym_name][4] = True
+    if sym_name in sym_tab:
+        sym_tab[sym_name][4] = True
 
 def add_value_to_sym_tab(sym_name, value, index=-1):
     global sym_tab
@@ -104,26 +128,33 @@ def add_value_to_sym_tab(sym_name, value, index=-1):
             sym_tab[sym_name][7] = value
         else:
             mod_index = index - sym_tab[sym_name][1]
-            if sym_tab[sym_name][7] == -1:
-                sym_tab[sym_name][7] = [ None for i in range(sym_tab[sym_name][2] + 1) ]
-                sym_tab[sym_name][7][mod_index] = value
-            else:
-                sym_tab[sym_name][7][mod_index] = value
+            if sym_tab[sym_name][2] < 20:
+                if sym_tab[sym_name][7] == -1:
+                    sym_tab[sym_name][7] = [ None for i in range(sym_tab[sym_name][2] + 1) ]
+                    sym_tab[sym_name][7][mod_index] = value
+                else:
+                    sym_tab[sym_name][7][mod_index] = value
 
 def get_value(sym_name, index=-1):
     global sym_tab
-    print(sym_name, " ", index)
     if not str(sym_name).isdigit():
-        if index == -1:
-            return sym_tab[sym_name][7]
-        else:
-            if sym_tab[sym_name][7] != -1:
-                mod_index = index - sym_tab[sym_name][1]
-                return sym_tab[sym_name][7][mod_index]
-            else:
-                return -1
-    else:
+        if check_if_val_possible(sym_name):
+            if index == -1: # PID
+                return sym_tab[sym_name][7]
+            else: # TAB
+                if sym_tab[sym_name][7] != -1:
+                    if str(index).isdigit():
+                        mod_index = index - sym_tab[sym_name][1]
+                        return sym_tab[sym_name][7][mod_index]
+                    else:
+                        val = get_value(index)
+                        if val != -1:
+                            mod_index = val - sym_tab[sym_name][1]
+                            return sym_tab[sym_name][7][mod_index]
         return -1
+
+    else:
+        return sym_name
 
 def check_if_initialized(sym_name, line):
     global sym_tab
@@ -135,7 +166,11 @@ def check_if_initialized(sym_name, line):
 def check_if_modified(sym_name):
     global sym_tab
     if sym_name in sym_tab:
-        return sym_tab[sym_name][6]
+        mod = sym_tab[sym_name][6]
+        if mod == 0:
+            return False
+        else:
+            return True
     else:
         return True
 
@@ -218,6 +253,7 @@ def check_if_dead_code():
         return (False, -1)
 
 def expand_loop(code, itr):
+    global code_start
 
     if itr < 0:
         return -1
@@ -227,6 +263,8 @@ def expand_loop(code, itr):
         for i in range(itr):
             for el in code:
                 generate_code(el)
+                if el == "GET a":
+                    code_start = gen_label()
         return 1
 
 def check_if_expand(val_1, val_2, type):
@@ -252,11 +290,19 @@ def check_if_expand(val_1, val_2, type):
         return (False, -1)
 
 
+def update_register(register, value):
+    global regs_status
+
+    regs_status[register] = value
+
+
 #-------------------     VARIABLES & MEMORY   ---------------------------------#
 
 def prepare_num(num, register):
 
+
     generate_code(("RESET " + register))
+        # update_register(register, 0)
     helper = []
     while num != 0:
         if num % 2 == 1:
@@ -270,6 +316,32 @@ def prepare_num(num, register):
         helper.reverse()
         for el in helper:
             generate_code(el)
+
+def prepare_best_num(value, register):
+    global regs_status
+    best = register
+    print(register, " INIT ", value)
+    val = abs(regs_status[register] - value)
+    true_value = value - regs_status[register]
+    for el in regs_status:
+        check = abs(regs_status[el] - value)
+        if check < val:
+            best = el
+            val = check
+            true_value = regs_status[el] - value
+    print(best, " BEST ", val)
+    if val < 20 and best != register:
+        # update_register(best, value)
+        generate_code("RESET " + best)
+        if true_value >= 0:
+            for _ in range(val):
+                generate_code("INC " + best)
+        else:
+            for _ in range(val):
+                generate_code("DEC " + best)
+    else:
+        prepare_num(value, register)
+        # update_register(register, value)
 
 def get_tab_value(sym_name, arr, register):
 
@@ -340,10 +412,11 @@ def assign_to_mem(sym_name, arr=-1):
         generate_code("LOAD b a")
 
 def print_memory():
-    global data_offset
+    global data_offsetload
 
     # ONLY FOR DEBUGING
     generate_code("RESET a")
+
     for _ in range(data_offset + 1):
         generate_code("PUT a")
         generate_code("INC a")
@@ -354,7 +427,7 @@ def perform_add(arg_1, arg_2):
     # b musi być na outpucie
     if arg_1[0] == 'num':
         make_used(arg_2[1])
-        if arg_1[1] < 6:
+        if arg_1[1] < 20:
             load_var(arg_2[1], arg_2[2], 'b')
             generate_code("LOAD b b")
             for _ in range(arg_1[1]):
@@ -367,7 +440,7 @@ def perform_add(arg_1, arg_2):
 
     if arg_2[0] == 'num':
         make_used(arg_1[1])
-        if arg_2[1] < 6:
+        if arg_2[1] < 20:
             load_var(arg_1[1], arg_1[2], 'b')
             generate_code("LOAD b b")
             for _ in range(arg_2[1]):
@@ -398,7 +471,7 @@ def perform_sub(arg_1, arg_2):
 
     if arg_2[0] == 'num':
         make_used(arg_1[1])
-        if arg_2[1] < 6:
+        if arg_2[1] < 20:
             load_var(arg_1[1], arg_1[2], 'b')
             generate_code("LOAD b b")
             for _ in range(arg_2[1]):
@@ -425,7 +498,7 @@ def prepare_condition(value, register):
     else:
         make_used(value[1])
         load_var(value[1], value[2], register)
-        generate_code(("LOAD " + register + register))
+        generate_code(("LOAD " + register + " " + register))
 
 
 
@@ -446,6 +519,7 @@ def p_program(p):
         program     : DECLARE declarations BEGIN commands END
                     | BEGIN commands END
     '''
+    print(sym_tab)
     dead = check_if_dead_code()
     if dead[0]:
         clear_code(dead[1])
@@ -521,13 +595,14 @@ def p_command_assign(p):
     if get_sym(p[1][1])[8] == True:
         raise FatalError("Nadpisanie zmiennej lokalnej w linii: ", p.lineno(1))
 
-    # pid
-    if not str(p[1][2]).isdigit() and p[1][2] != -1:
+    # Tab
+    if p[1][2] != -1:
         val = get_value(p[1][2])
         if val != -1:
             add_value_to_sym_tab(p[1][1], p[3], val)
-    else:
+    else: #PID / NUM
         add_value_to_sym_tab(p[1][1], p[3], p[1][2])
+
     load_var(p[1][1], p[1][2])
     generate_code("STORE b a")
     make_initialized(p[1][1])
@@ -596,7 +671,7 @@ def p_iterator(p):
     '''
         iterator : pidentifier
     '''
-    add_to_sym_tab(p[1], False, 0, 0, data_location(), False)
+    add_to_sym_tab(p[1], False, 0, 0, data_location(), False, local=True)
     make_initialized(p[1])
     p[0] = (p[1], gen_label())
 
@@ -728,6 +803,10 @@ def p_command_read(p):
         command         : READ identifier SEMICOLON
     '''
     global code_start
+
+    if get_sym(p[2][1])[8] == True:
+        raise FatalError("Nadpisanie zmiennej lokalnej w linii: ", p.lineno(1))
+
     load_var(p[2][1], p[2][2])
     generate_code("GET a")
     make_initialized(p[2][1])
@@ -767,7 +846,12 @@ def p_expression_value(p):
          check_if_initialized(p[1][1], p.lineno(1))
          if p[1][0] == 'array' and str(p[1][2]).isdigit() == False:
              check_if_initialized(p[1][2], p.lineno(1))
-         p[0] = -1
+
+         val = get_value(p[1][1], p[1][2])
+         if val != -1:
+            p[0] = val
+         else:
+             p[0] = -1
      else:
          p[0] = p[1][1]
 
@@ -781,8 +865,8 @@ def p_expression_add(p):
         assign_to_mem(p[1][1] + p[3][1])
         p[0] = p[1][1] + p[3][1]
      else:
-         perform_add(p[1], p[3])
-         p[0] = -1
+        perform_add(p[1], p[3])
+        p[0] = -1
 
 def p_expression_sub(p):
      '''
@@ -790,28 +874,27 @@ def p_expression_sub(p):
 
      '''
      if p[1][0] == 'num' and p[3][0] == 'num':
-
         assign_to_mem(max(p[1][1] - p[3][1], 0))
         p[0] = max(p[1][1] - p[3][1], 0)
      else:
+         val_1 = get_value(p[1][1], p[1][2])
+         val_2 = get_value(p[3][1], p[3][2])
          perform_sub(p[1], p[3])
+         # if val_1 != -1 and val_2 != -1:
+         #     p[0] = max(val_1 - val_2, 0)
+         # else:
          p[0] = -1
 
 def p_expression_mul(p):
     '''
         expression  : value MUL value
     '''
-
-    # # val_1 = get_value(p[1][1], p[1][2])
-    # # val_2 = get_value(p[3][1], p[3][2])
-    # print(val_1, " ", val_2)
+    val_1 = get_value(p[1][1], p[1][2])
+    val_2 = get_value(p[3][1], p[3][2])
 
     if (p[1][0] == 'num' and p[3][0] == 'num'):
-       assign_to_mem(p[1][1] * p[3][1])
-       p[0] = p[1][1] * p[3][1]
-    # elif (val_1 != -1 and val_2 != -1):
-    #     assign_to_mem(val_1 * val_2)
-    #     p[0] = val_1 * val_2
+        assign_to_mem(p[1][1] * p[3][1])
+        p[0] = p[1][1] * p[3][1]
     else:
         p[0] = -1
         if p[1][0] != 'num' and p[3][0] != 'num':
@@ -875,7 +958,8 @@ def p_expression_div(p):
         expression  : value DIV value
 
      '''
-
+     val_1 = get_value(p[1][1], p[1][2])
+     val_2 = get_value(p[3][1], p[3][2])
      if p[1][1] == 0 or p[3][1] == 0:
          assign_to_mem(0)
          p[0] = 0
@@ -1172,6 +1256,7 @@ def p_identifier_par(p):
     check_if_exists(p[1])
     check_if_exists(p[3])
     make_used(p[3])
+    make_used(p[1])
     if get_sym(p[1])[0] == True:
         val = get_value(p[3])
         if val == -1:

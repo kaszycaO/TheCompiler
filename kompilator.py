@@ -283,9 +283,7 @@ def check_if_expand(val_1, val_2, type):
 
 def prepare_num(num, register):
 
-
     generate_code(("RESET " + register))
-        # update_register(register, 0)
     helper = []
     while num != 0:
         if num % 2 == 1:
@@ -311,14 +309,13 @@ def get_tab_value(sym_name, arr, register):
     arr_sym = get_sym(arr)
     arr_off = arr_sym[3]
 
-    # mam a z p(a)
+    # prepare a from p(a)
     prepare_num(arr_off, register)
     generate_code("RESET e")
     generate_code("LOAD " + 'e' + " " + register)
     prepare_num(start, register)
     generate_code("SUB e " + register)
     prepare_num(off, register)
-    # jestem na p(arr)
     generate_code("ADD " + register + " " + 'e')
 
 def load_var(sym_name, arr=-1, register='a'):
@@ -381,7 +378,7 @@ def print_memory():
 #---------------------   MATH OPERATIONS --------------------------------------#
 
 def perform_add(arg_1, arg_2):
-    # b musi być na outpucie
+    # b must be in output
     if arg_1[0] == 'num':
         make_used(arg_2[1])
         if arg_1[1] < 20:
@@ -418,7 +415,7 @@ def perform_add(arg_1, arg_2):
         generate_code("ADD b f")
 
 def perform_sub(arg_1, arg_2):
-    # b musi być na outpucie
+    # b must be in output
     if arg_1[0] == 'num':
         make_used(arg_2[1])
         load_var(arg_2[1], arg_2[2])
@@ -476,7 +473,6 @@ def p_program(p):
         program     : DECLARE declarations BEGIN commands END
                     | BEGIN commands END
     '''
-    print(sym_tab)
     dead = check_if_dead_code()
     if dead[0]:
         clear_code(dead[1])
@@ -653,9 +649,14 @@ def p_command_for_to(p):
         assign_to_mem(p[4][1], p[4][2])
         load_var(p[2][0])
         generate_code("STORE b a")
+
         if p[6][0] != 'num':
-            load_var(p[6][1], p[6][2], 'd')
-            generate_code("LOAD d d")
+            val = get_value(p[6][1], p[6][2])
+            if val != -1:
+                prepare_num(val, 'd')
+            else:
+                load_var(p[6][1], p[6][2], 'd')
+                generate_code("LOAD d d")
         else:
             prepare_num(p[6][1], 'd')
 
@@ -672,19 +673,21 @@ def p_command_for_to(p):
         helper = insert_code(p[2][1], injection_index)
 
 
-        # koniec przedziału
+        # end of interval
         prepare_num(off, 'a')
         generate_code("LOAD d a")
+        # iterator
         load_var(p[2][0])
         generate_code("LOAD b a")
         generate_code("INC b")
         generate_code("STORE b a")
 
-        # warunek końca
+        # end condition
         generate_code("RESET c")
         generate_code("ADD c d")
         generate_code("INC c") # i = <x, y>
-        generate_code("LOAD a a")
+        generate_code("RESET a")
+        generate_code("ADD a b")
         generate_code("SUB c a")
         generate_code("JZERO c 2")
         generate_code("JUMP -" + str(gen_label() - (p[2][1] + helper)))
@@ -712,8 +715,12 @@ def p_command_for_downto(p):
         load_var(p[2][0])
         generate_code("STORE b a")
         if p[6][0] != 'num':
-            load_var(p[6][1], p[6][2], 'd')
-            generate_code("LOAD d d")
+            val = get_value(p[6][1], p[6][2])
+            if val != -1:
+                prepare_num(val, 'd')
+            else:
+                load_var(p[6][1], p[6][2], 'd')
+                generate_code("LOAD d d")
         else:
             prepare_num(p[6][1], 'd')
 
@@ -736,15 +743,14 @@ def p_command_for_downto(p):
         # TODO load a improvement
         load_var(p[2][0])
 
-        # warunek końca
+        # end condition
         generate_code("RESET c")
-        generate_code("LOAD a a")
-        generate_code("ADD c a")
+        generate_code("LOAD c a")
+        generate_code("RESET b")
+        generate_code("ADD b c")
         generate_code("SUB c d")
 
         # decrement
-        load_var(p[2][0])
-        generate_code("LOAD b a")
         generate_code("DEC b")
         generate_code("STORE b a")
 
@@ -774,7 +780,6 @@ def p_command_write(p):
         command         :   WRITE value SEMICOLON
     '''
     p[0] = gen_label()
-
 
     if p[2][0] == 'num':
         prepare_num(p[2][1], 'f')
@@ -806,7 +811,7 @@ def p_expression_value(p):
 
          val = get_value(p[1][1], p[1][2])
          if val != -1:
-            p[0] = val
+             p[0] = val
          else:
              p[0] = -1
      else:
@@ -834,20 +839,13 @@ def p_expression_sub(p):
         assign_to_mem(max(p[1][1] - p[3][1], 0))
         p[0] = max(p[1][1] - p[3][1], 0)
      else:
-         val_1 = get_value(p[1][1], p[1][2])
-         val_2 = get_value(p[3][1], p[3][2])
          perform_sub(p[1], p[3])
-         # if val_1 != -1 and val_2 != -1:
-         #     p[0] = max(val_1 - val_2, 0)
-         # else:
          p[0] = -1
 
 def p_expression_mul(p):
     '''
         expression  : value MUL value
     '''
-    val_1 = get_value(p[1][1], p[1][2])
-    val_2 = get_value(p[3][1], p[3][2])
 
     if (p[1][0] == 'num' and p[3][0] == 'num'):
         assign_to_mem(p[1][1] * p[3][1])
@@ -858,10 +856,24 @@ def p_expression_mul(p):
             make_used(p[1][1])
             make_used(p[3][1])
             load_var(p[1][1], p[1][2], 'b')
-            generate_code("RESET f")
             generate_code("LOAD b b")
             load_var(p[3][1], p[3][2])
             generate_code("LOAD a a")
+
+            # swap values
+            generate_code("RESET f")
+            generate_code("ADD f a")
+            generate_code("SUB f b")
+            generate_code("JZERO f 7")
+            generate_code("RESET f")
+            generate_code("ADD f a")
+            generate_code("RESET a")
+            generate_code("ADD a b")
+            generate_code("RESET b")
+            generate_code("ADD b f")
+
+            # ALGORITM
+            generate_code("RESET f")
             # warunek końca pętli
             generate_code("JZERO a 11")
             generate_code("DEC a")
@@ -915,8 +927,6 @@ def p_expression_div(p):
         expression  : value DIV value
 
      '''
-     val_1 = get_value(p[1][1], p[1][2])
-     val_2 = get_value(p[3][1], p[3][2])
      if p[1][1] == 0 or p[3][1] == 0:
          assign_to_mem(0)
          p[0] = 0
@@ -948,34 +958,34 @@ def p_expression_div(p):
         # b / a : num / den
 
         # init
-        generate_code("RESET b") # wynik
-        generate_code("JZERO a 23") # czy a = 0
+        generate_code("RESET b") # result
+        generate_code("JZERO a 23") # check if a = 0
         generate_code("RESET e") # place
         generate_code("INC e") # place
 
-        # pętla I
-        generate_code("RESET f") # helper w pętli
+        # loop I
+        generate_code("RESET f") # helper in loop
         generate_code("ADD f d")
         generate_code("SHR f")
         generate_code("INC f")
         generate_code("SUB f a")
-        generate_code("JZERO f 4") # wyjście z pętli
+        generate_code("JZERO f 4") # end of loop
         generate_code("SHL e")
         generate_code("SHL a")
-        generate_code("JUMP -8") # ponowne sprawdzenie warunku
+        generate_code("JUMP -8") # check condition again
 
-        # pętla II
-        generate_code("JZERO e 11") # wyjście z pętli
-        generate_code("RESET f") # helper w ifie
+        # loop II
+        generate_code("JZERO e 11") # end of loop
+        generate_code("RESET f") # helper in if
         generate_code("ADD f d")
         generate_code("INC f")
         generate_code("SUB f a")
-        generate_code("JZERO f 3") # if nie
-        generate_code("SUB d a") # if tak
+        generate_code("JZERO f 3") # if no
+        generate_code("SUB d a") # if yes
         generate_code("ADD b e")
         generate_code("SHR e")
         generate_code("SHR a")
-        # powrót na początek pętli
+        # check loop II condition again
         generate_code("JUMP -10")
 
 def p_expression_mod(p):
@@ -1013,32 +1023,32 @@ def p_expression_mod(p):
        # b / a : num / den
 
        # init
-       generate_code("JZERO a 22") # czy a = 0
+       generate_code("JZERO a 22") # check if a = 0
        generate_code("RESET e") # place
        generate_code("INC e") # place
-       # pętla I
-       generate_code("RESET f") # helper w pętli
+       # loop I
+       generate_code("RESET f") # helper in loop I
        generate_code("ADD f b")
        generate_code("SHR f")
        generate_code("INC f")
        generate_code("SUB f a")
-       generate_code("JZERO f 4") # wyjście z pętli
+       generate_code("JZERO f 4") # end of loop I
        generate_code("SHL e")
        generate_code("SHL a")
-       generate_code("JUMP -8") # ponowne sprawdzenie warunku
+       generate_code("JUMP -8") # check loop I condition
 
-       # pętla II
-       generate_code("JZERO e 11") # wyjście z pętli
-       generate_code("RESET f") # helper w ifie
+       # loop II
+       generate_code("JZERO e 11") ## end of loop II
+       generate_code("RESET f") # helper in if
        generate_code("ADD f b")
        generate_code("INC f")
        generate_code("SUB f a")
-       generate_code("JZERO f 2") # if nie
-       generate_code("SUB b a") # if tak
+       generate_code("JZERO f 2") # if no
+       generate_code("SUB b a") # if yes
        generate_code("SHR e")
        generate_code("SHR a")
-       generate_code("JUMP -9") # powrót na początek pętli
-       # wynik w b
+       generate_code("JUMP -9") # check loop II condition
+       # result in b
        generate_code("RESET b")
 
 #--------------------------------  CONDITIONS ---------------------------------#
@@ -1056,14 +1066,13 @@ def p_condition_eq(p):
      generate_code("SUB e f")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie
+     generate_code("JUMP x") # <- no
      generate_code("ADD e f")
      generate_code("SUB e b")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie
-     # code.append("code") # <- tak
-     labels.append(("END", ""))
+     generate_code("JUMP x") # <- no
+     labels.append(("END", "")) # <- yes
      p[0] = gen_label()
 
 def p_condition_neq(p):
@@ -1078,14 +1087,14 @@ def p_condition_neq(p):
      generate_code("SUB e f")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
-     generate_code("JUMP x") # <- tak
+     generate_code("JUMP x") # <- yes
      generate_code("ADD e f")
      generate_code("SUB e b")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
-     generate_code("JUMP x") # <- tak
+     generate_code("JUMP x") # <- yes
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie
+     generate_code("JUMP x") # <- no
      labels.append(("END", ""))
      p[0] = gen_label()
 
@@ -1102,9 +1111,9 @@ def p_condition_gt(p):
      generate_code("SUB e f")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
-     generate_code("JUMP x") # <- tak
+     generate_code("JUMP x") # <- yes
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie
+     generate_code("JUMP x") # <- no
      labels.append(("END", ""))
      p[0] = gen_label()
 
@@ -1121,9 +1130,9 @@ def p_condition_lt(p):
      generate_code("SUB e b")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
-     generate_code("JUMP x") # <- tak
+     generate_code("JUMP x") # <- yes
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie
+     generate_code("JUMP x") # <- no
      labels.append(("END", ""))
      p[0] = gen_label()
 
@@ -1140,9 +1149,9 @@ def p_condition_geq(p):
      generate_code("SUB e f")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
-     generate_code("JUMP x") # <- tak
+     generate_code("JUMP x") # <- yes
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie (potencjalne przyspieszenie)
+     generate_code("JUMP x") # <- no
      labels.append(("END", ""))
      p[0] = gen_label()
 
@@ -1159,9 +1168,9 @@ def p_condition_leq(p):
      generate_code("SUB e b")
      generate_code("JZERO e 2")
      labels.append((gen_label(), "commands_YES"))
-     generate_code("JUMP x") # <- tak
+     generate_code("JUMP x") # <- yes
      labels.append((gen_label(), "commands_NO"))
-     generate_code("JUMP x") # <- nie
+     generate_code("JUMP x") # <- no
      labels.append(("END", ""))
      p[0] = gen_label()
 
