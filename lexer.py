@@ -1,5 +1,6 @@
 from ply import lex
 
+ERROR = '\033[91m'
 
 tokens = (
     'DECLARE', 'BEGIN', 'END', 'SEMICOLON',
@@ -81,24 +82,10 @@ def t_newline(t):
 
 
 def t_error(t):
-    print("Nieprawidlowy znak: '%s'" % t.value[0])
-    t.lexer.skip(1)
+    raise Exception(ERROR + "Nieprawidlowy znak: '%s' "%  t.value[0] + " w linii %d" % t.lineno)
+
 
 t_ignore = ' \t'
-# check
 t_ignore_comment = r'\[[^\]]*\]'
 
 lexer = lex.lex()
-#
-# while True:
-#     try:
-#         s = input()
-#     except EOFError:
-#         break
-#     if not s: continue
-#     lexer.input(s)
-#     while True:
-#         tok = lexer.token()
-#         if not tok:
-#             break      # No more input
-#         print(tok)
