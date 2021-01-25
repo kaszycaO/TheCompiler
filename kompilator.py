@@ -379,6 +379,7 @@ def print_memory():
 
 def perform_add(arg_1, arg_2):
     # b must be in output
+
     if arg_1[0] == 'num':
         make_used(arg_2[1])
         if arg_1[1] < 20:
@@ -959,7 +960,13 @@ def p_expression_div(p):
 
         # init
         generate_code("RESET b") # result
-        generate_code("JZERO a 23") # check if a = 0
+        generate_code("JZERO a 31") # check if a = 0
+        generate_code("DEC a")
+        generate_code("JZERO a 28") # check if a = 1
+        generate_code("DEC a")
+        generate_code("JZERO a 25") # check if a = 1
+        generate_code("INC a")
+        generate_code("INC a")
         generate_code("RESET e") # place
         generate_code("INC e") # place
 
@@ -975,7 +982,7 @@ def p_expression_div(p):
         generate_code("JUMP -8") # check condition again
 
         # loop II
-        generate_code("JZERO e 11") # end of loop
+        generate_code("JZERO e 13") # end of loop
         generate_code("RESET f") # helper in if
         generate_code("ADD f d")
         generate_code("INC f")
@@ -987,6 +994,8 @@ def p_expression_div(p):
         generate_code("SHR a")
         # check loop II condition again
         generate_code("JUMP -10")
+        generate_code("SHR d")
+        generate_code("ADD b d")
 
 def p_expression_mod(p):
      '''
@@ -1023,7 +1032,13 @@ def p_expression_mod(p):
        # b / a : num / den
 
        # init
-       generate_code("JZERO a 22") # check if a = 0
+       generate_code("JZERO a 29") # check if a = 0
+       generate_code("DEC a")
+       generate_code("JZERO a 27") # check if a = 1
+       generate_code("DEC a")
+       generate_code("JZERO a 24") # check if a = 2
+       generate_code("INC a")
+       generate_code("INC a")
        generate_code("RESET e") # place
        generate_code("INC e") # place
        # loop I
@@ -1038,7 +1053,7 @@ def p_expression_mod(p):
        generate_code("JUMP -8") # check loop I condition
 
        # loop II
-       generate_code("JZERO e 11") ## end of loop II
+       generate_code("JZERO e 15") ## end of loop II
        generate_code("RESET f") # helper in if
        generate_code("ADD f b")
        generate_code("INC f")
@@ -1049,7 +1064,11 @@ def p_expression_mod(p):
        generate_code("SHR a")
        generate_code("JUMP -9") # check loop II condition
        # result in b
+       generate_code("JODD b 3")
        generate_code("RESET b")
+       generate_code("JUMP 3")
+       generate_code("RESET b")
+       generate_code("INC b")
 
 #--------------------------------  CONDITIONS ---------------------------------#
 
@@ -1243,10 +1262,13 @@ if __name__ == "__main__":
     if len(sys.argv) == 3:
         parser = yacc.yacc()
         parsed = []
-        with open(sys.argv[1], "r") as f:
-            parsed = parser.parse(f.read(),tracking=True)
-        with open(sys.argv[2], "w+") as f:
-            for el in parsed:
-                f.write(el + "\n")
+        try:
+            with open(sys.argv[1], "r") as f:
+                parsed = parser.parse(f.read(),tracking=True)
+            with open(sys.argv[2], "w+") as f:
+                for el in parsed:
+                    f.write(el + "\n")
+        except (FatalError, SyntaxError, OutOfBoundsError) as e:
+            print(e)
     else:
         sys.stderr.write("Nieprawidłowe parametry wejściowe!\n")
