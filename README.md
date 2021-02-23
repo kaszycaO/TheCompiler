@@ -1,14 +1,14 @@
 # Simple compiler
 
-### Requirements
+## Requirements
 
-## Compiler
+### Compiler
 ```
 Python 3.8.5 
 PLY 3.11
 ```
 
-## Virtual machine (by dr Maciej Gębala)
+### Virtual machine (by dr Maciej Gębala)
 ```
 bison (GNU Bison) 3.5.1
 flex 2.6.4
@@ -18,7 +18,7 @@ g++ 9.3.0
 libcln-dev 1.3.6
 ```
 
-### Compilation
+## Compilation
 
 ```
 
@@ -26,7 +26,7 @@ python3 kompilator.py input output
 
 ```
 
-### Run
+## Run
 ```
 ./maszyna-wirtualna output
 
